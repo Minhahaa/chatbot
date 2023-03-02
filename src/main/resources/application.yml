@@ -80,6 +80,18 @@ spring:
     url : jdbc:log4jdbc:sqlserver://10.10.10.55:1433;databaseName=BESTIMRO;rewriteBatchedStatements=true;
     username : sa 
     password : dhvltm^tmxhfl
+  datasource-sm:
+    type: com.zaxxer.hikari.HikariDataSource
+    driver-class-name: net.sf.log4jdbc.sql.jdbcapi.DriverSpy
+    url : jdbc:log4jdbc:sqlserver://10.10.10.55:1433;databaseName=SM;rewriteBatchedStatements=true;
+    username : sa 
+    password : dhvltm^tmxhfl
+  datasource-wis:
+    type: com.zaxxer.hikari.HikariDataSource
+    driver-class-name: net.sf.log4jdbc.sql.jdbcapi.DriverSpy
+    url : jdbc:log4jdbc:sqlserver://10.10.10.56:5555;databaseName=WIS;rewriteBatchedStatements=true;
+    username : sa 
+    password : dhvltm^tmxhfl
     
 #spring.datasource.driver-class-name : com.microsoft.sqlserver.jdbc.SQLServerDriver
 #spring.datasource.url : jdbc:sqlserver://10.10.10.55:1433;databaseName=GPPLATFORM;

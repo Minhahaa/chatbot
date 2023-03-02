@@ -1,4 +1,4 @@
-package com.gp.chatbot.model.vo.order.erp;
+package com.gp.chatbot.model.vo.erp.order;
 
 import javax.persistence.Column;
 import javax.persistence.Entity;

@@ -5,9 +5,9 @@ import java.util.HashMap;
 import javax.sql.DataSource;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Primary;
 import org.springframework.context.annotation.PropertySource;
 import org.springframework.core.env.Environment;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
@@ -20,23 +20,23 @@ import org.springframework.transaction.PlatformTransactionManager;
 @Configuration
 @PropertySource("classpath:/application.yml")
 @EnableJpaRepositories(
-	    basePackages = "com.gp.chatbot.model.repositories.erp", 
-	    entityManagerFactoryRef = "erpEntityManager", 
-	    transactionManagerRef = "erpTransactionManager"
+	    basePackages = "com.gp.chatbot.model.repositories.sm", 
+	    entityManagerFactoryRef = "smEntityManager", 
+	    transactionManagerRef = "smTransactionManager"
 )
-public class ErpDatabaseConfig {
+public class SmDatabaseConfig {
 
 	@Autowired
     private Environment env;
 	
 	@Bean
-    @Primary
-    public LocalContainerEntityManagerFactoryBean erpEntityManager() {
+	@Qualifier
+    public LocalContainerEntityManagerFactoryBean smEntityManager() {
         LocalContainerEntityManagerFactoryBean em
           = new LocalContainerEntityManagerFactoryBean();
-        em.setDataSource(erpDataSource());
+        em.setDataSource(smDataSource());
         em.setPackagesToScan(
-          new String[] { "com.gp.chatbot.model.vo.erp" });
+          new String[] { "com.gp.chatbot.model.vo.sm" });
 
         HibernateJpaVendorAdapter vendorAdapter
           = new HibernateJpaVendorAdapter();
@@ -49,29 +49,29 @@ public class ErpDatabaseConfig {
         return em;
     }
 	
-	@Primary
     @Bean
-    public DataSource erpDataSource() {
+    @Qualifier
+    public DataSource smDataSource() {
  
         DriverManagerDataSource dataSource
           = new DriverManagerDataSource();
         dataSource.setDriverClassName(
-          env.getProperty("spring.datasource-erp.driver-class-name"));
-        dataSource.setUrl(env.getProperty("spring.datasource-erp.url"));
-        dataSource.setUsername(env.getProperty("spring.datasource-erp.username"));
-        dataSource.setPassword(env.getProperty("spring.datasource-erp.password"));
+          env.getProperty("spring.datasource-sm.driver-class-name"));
+        dataSource.setUrl(env.getProperty("spring.datasource-sm.url"));
+        dataSource.setUsername(env.getProperty("spring.datasource-sm.username"));
+        dataSource.setPassword(env.getProperty("spring.datasource-sm.password"));
 
         return dataSource;
     }
 	
-	@Primary
     @Bean
-    public PlatformTransactionManager erpTransactionManager() {
+    @Qualifier
+    public PlatformTransactionManager smTransactionManager() {
  
         JpaTransactionManager transactionManager
           = new JpaTransactionManager();
         transactionManager.setEntityManagerFactory(
-        		erpEntityManager().getObject());
+        		smEntityManager().getObject());
         return transactionManager;
     }
 	

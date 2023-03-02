@@ -1,4 +1,4 @@
-package com.gp.chatbot.model.vo.order.besti;
+package com.gp.chatbot.model.vo.besti.order;
 
 import javax.persistence.Column;
 import javax.persistence.Entity;
@@ -17,12 +17,12 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public @Data class ModenStatEntity{
 	 
-    @Id
-    @Column(nullable = false, name="ord_no")
-    private String ordNo; //
-	
+	@Id
     @Column(length = 50, nullable = false, name="unq_no")
     private String unqNo;//
+    
+    @Column(nullable = false, name="ord_no")
+    private String ordNo; //
 	
     @Column(length = 30, nullable = false, name="goods_cd")
     private String goodsCd;//상품코드
@@ -45,8 +45,8 @@ public @Data class ModenStatEntity{
     @Column(nullable = true, name="add_date")
     private String addDate; //반품금액
     
-    public ModenStatEntity(String ord_no) {
-    	this.ordNo = ord_no;
+    public ModenStatEntity(String unqNo) {
+    	this.unqNo = unqNo;
     }
 
 }

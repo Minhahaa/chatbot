@@ -20,7 +20,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 @Configuration
 @PropertySource("classpath:/application.yml")
 @EnableJpaRepositories(
-	    basePackages = "com.gp.chatbot.model.repositories.goods.besti", 
+	    basePackages = "com.gp.chatbot.model.repositories.besti", 
 	    entityManagerFactoryRef = "bestiEntityManager", 
 	    transactionManagerRef = "bestiTransactionManager"
 )
@@ -36,7 +36,7 @@ public class BestiDatabaseConfig {
           = new LocalContainerEntityManagerFactoryBean();
         em.setDataSource(bestiDataSource());
         em.setPackagesToScan(
-          new String[] { "com.gp.chatbot.model.vo.order.besti" });
+          new String[] { "com.gp.chatbot.model.vo.besti" });
 
         HibernateJpaVendorAdapter vendorAdapter
           = new HibernateJpaVendorAdapter();

@@ -1,4 +1,4 @@
-package com.gp.chatbot.model.vo.order.erp;
+package com.gp.chatbot.model.vo.erp.order;
 
 import javax.persistence.Column;
 import javax.persistence.Entity;
@@ -17,6 +17,9 @@ import lombok.NoArgsConstructor;
 public @Data class OrderDetailEntity{
 	 
     @Id
+    @Column(length = 30, nullable = true, name="goods_cd")
+    private String goodsCd; //상품코드
+    
     @Column(nullable = false, name="ord_no")
     private String ordNo; //
 	
@@ -97,9 +100,6 @@ public @Data class OrderDetailEntity{
     
     @Column(length = 30, nullable = true, name="pch_unit_amt")
     private String pchUnitAmt; //매입단가
-    
-    @Column(length = 30, nullable = true, name="goods_cd")
-    private String goodsCd; //상품코드
     
     @Column(length = 10, nullable = true, name="volume_dc")
     private String volumeDc; //볼륨DC유무
