@@ -1,16 +1,12 @@
 package com.gp.chatbot.controller.api;
 
 import java.io.BufferedReader;
-import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.UnsupportedEncodingException;
-import java.net.HttpURLConnection;
-import java.net.MalformedURLException;
-import java.net.URISyntaxException;
 import java.net.URL;
-import java.net.URLEncoder;
+import java.net.URLConnection;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -22,21 +18,27 @@ import java.util.stream.IntStream;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.gp.chatbot.model.bo.project.TrackerDeliBO;
 import com.gp.chatbot.model.repositories.besti.order.ModenStatRepository;
 import com.gp.chatbot.model.repositories.erp.order.OrderDetailRepository;
 import com.gp.chatbot.model.repositories.erp.order.OrderMasterRepository;
 import com.gp.chatbot.model.repositories.sm.common.TcodeDtlRepository;
+import com.gp.chatbot.model.repositories.sm.order.TdeliStatRepository;
 import com.gp.chatbot.model.repositories.wis.order.TwDirectDeliRepository;
 import com.gp.chatbot.model.vo.besti.order.ModenStatEntity;
 import com.gp.chatbot.model.vo.erp.order.OrderDetailEntity;
 import com.gp.chatbot.model.vo.erp.order.OrderMasterEntity;
 import com.gp.chatbot.model.vo.sm.common.TcodeDtlEntity;
+import com.gp.chatbot.model.vo.sm.order.TdeliStatEntity;
 import com.gp.chatbot.model.vo.wis.order.TwDirectDeliEntity;
 
 @RestController
@@ -58,7 +60,15 @@ public class KakaoChatBotContorller {
 	@Autowired
 	private TcodeDtlRepository tcodeDetail; //SM TCODEDTL ALL CODE TABLE
 	
+	@Autowired
+	private TdeliStatRepository tdeliStat; //SM TDELISTAT
+	
+	
 	static final String MODEN_CUST = "94226"; 
+	static final String MODEN_CODE = "037";
+	
+	static final String TRACKER_URL = "https://apis.tracker.delivery/carriers/";
+	private static Pattern PATTERN_BRACKET = Pattern.compile("\\([^\\(\\)]+\\)");
 	
 	@RequestMapping(value="/sayHello", produces = "application/json; charset=utf-8")
 	@ResponseBody
@@ -197,6 +207,7 @@ public class KakaoChatBotContorller {
 			//주문정보가 없는지 확인
 			if(orderCheck != null && !orderCheck.isEmpty()) {
 				System.out.println(orderCheck);
+				
 				HashMap<String, String> isss = pchTypeCheck(orderCheck,ordNo);
 				//test용 wis 확인
 				
@@ -243,71 +254,135 @@ public class KakaoChatBotContorller {
 		HashMap<String,String> nowStat = new HashMap<>();
 		String pchType = orderCheck.get(0).getPchType();
 		
+		TrackerDeliBO tracker = new TrackerDeliBO();
+		HashMap<String,String> trackers = tracker.getTrackerName();
+		
+		HashMap<String,String> deliInfo = new HashMap<>(); //전체 송장내용 저장 Map
+		
 		if(pchType.equals("100")) {
+			//PCH TYPE이 100인 물류센터에서 바로 나가는 주문건
+			List<OrderMasterEntity> master = orderMaster.findByOrdNo(ordNo);
+			List<TcodeDtlEntity> tcode = tcodeDetail.findByCdNo("W04"); //물류 상태 코드
+			HashMap<String,String> statusCodes = new HashMap<>();
+			
+			//배차 상태 코드를 Map에 담고 직접 접근
+			for(TcodeDtlEntity code : tcode) {
+				statusCodes.put(code.getCdDtlNo(), code.getCdDtlNm());
+			}
+			
+			//status code를 확인해서 상태값을 넣어줌
+			String status = statusCodes.get(master.get(0).getStatusCode());
+			for(int i = 0 ; i < orderCheck.size() ; i++) {
+				nowStat.put(orderCheck.get(i).getGoodsCd(), status);
+			}
+			System.out.println(nowStat);
 			
 		}else if(pchType.equals("200")) {
 			//best-i의 ModenStat Table에 모든 주문건인지 확인 ( 확인 로직 추가 )
 			List<ModenStatEntity> modenList = modenStat.findByUnqNoLikeOrderByStatusDesc(ordNo+"%");
+			
+			ArrayList<String> otherDelivery = new ArrayList<>();
+			
 			if(modenList != null && !modenList.isEmpty() ) {
 				//모든 주문건인 경우
 				System.out.println("moden 입니다");
 				/*
 				 *  01	메모전달 MSG_MANAGER:내부메모, MSG_CUSTOMER: 고객에게 전달할 메모
 					11	신규 주문확인(수주생성)
-					12	검수지시서 출력( 배차 지시 -> 클레임 가능 ) > *사용
-					13	검수시작( 이값이 존재하면 취소가 안됀다 )
-					14	검수종료( 배차확정 ) > *사용
+					12	검수지시서 출력( 배차 지시 -> 클레임 가능 ) > *기존 시스템 사용
+					13	검수시작( 이 값이 존재하면 취소 불가 )
+					14	검수종료( 배차확정 ) > *기존 시스템 사용
 					15	검수보류
-					19	배송출발 택배 (운송장 번호 어려개 생성 Repeater) > *사용
-					19	배송출발 직배(정보 1개 생성 배송담당 이름과 전화번호) > *사용
-					21	반품주문서 생성( 보류 ) > *사용
-					22	반품입고 완료( 보류 ) > *사용
+					19	배송출발 택배 (운송장 번호 여러개 생성 Repeater) > *기존 시스템 사용
+					19	배송출발 직배(정보 1개 생성 배송담당 이름과 전화번호) > *기존 시스템 사용
+					21	반품주문서 생성( 보류 ) > *기존 시스템 사용
+					22	반품입고 완료( 보류 ) > *기존 시스템 사용
 					31	교환주문접수
 					32	교환주문신청건 반품입고 완료
-					33	교환주문신청건 출고완료 > *사용
-					91	주문취소 접수 > *사용
-					92	주문취소 완료 > *사용
+					33	교환주문신청건 출고완료 > *기존 시스템 사용
+					91	주문취소 접수 > *기존 시스템 사용
+					92	주문취소 완료 > *기존 시스템 사용
 				 * */
 				System.out.println(modenList);
+				//moden map에는 { 송장번호 : 택배사코드 } 로 되어있음
+				HashMap<String, String> modenMap = new HashMap<String, String>();
+				
 				for(int i = 0 ; i < modenList.size() ; i++) {
 					
+					JSONArray parcelJson = new JSONArray();
 					ModenStatEntity modens = modenList.get(i);
 					
-					String status = modens.getStatus();
+					parcelJson.put(modens.getParcelData());
+					//System.out.println(parcelJson);
+					if(parcelJson.isEmpty() || parcelJson.isNull(0)) {
+						//otherDelivery.add(modenList.get(i).getGoodsCd());
+					}else {
+						modenMap = parseListMap(parcelJson);
+						System.out.println("***********" + modenMap);
+					}
+					
+					//Moden Office Code 확인
+					String status = modens.getStatus() == null ? "1" : modens.getStatus();
 					if(status != null && !status.isEmpty() && !status.isBlank()) {
-						String isBackStatus = "";
-						int stat = Integer.parseInt(status);
-						//System.out.println("stat = " + stat);
 						
-						switch(stat) {
-							case 1  : isBackStatus = modens.getMsg_manager() == null ? "담당자 확인중" : modens.getMsg_manager(); break;
-							case 11 : isBackStatus = "주문 확인중"; break;
-							case 12 : isBackStatus = "검수중"; break;
-							case 13 : isBackStatus = "검수시작"; break;
-							case 14 : isBackStatus = "배차확정"; break;
-							case 15 : isBackStatus = "검수중"; break;
-							case 19 : isBackStatus = "배송출발"; break;
-							case 21 : isBackStatus = "반품접수"; break;
-							case 22 : isBackStatus = "반품 입고완료"; break;
-							case 31 : isBackStatus = "교환주문 접수"; break;
-							case 32 : isBackStatus = "교환 입고완료"; break;
-							case 33 : isBackStatus = "교환상품 출고완료"; break;
-							case 91 : isBackStatus = "주문취소 접수"; break;
-							case 92 : isBackStatus = "주문취소 완료"; break;
-						}
-						nowStat.put(modens.getGoodsCd(), isBackStatus);
+							String isBackStatus = "";
+							int stat = Integer.parseInt(status);
+							//System.out.println("stat = " + stat);
+							
+							switch(stat) {
+								case 1  : isBackStatus = modens.getMsg_manager() == null ? "담당자 확인중" : modens.getMsg_manager(); break;
+								case 11 : isBackStatus = "주문 확인중"; break;
+								case 12 : isBackStatus = "검수중"; break;
+								case 13 : isBackStatus = "검수시작"; break;
+								case 14 : isBackStatus = "배차확정"; break;
+								case 15 : isBackStatus = "검수중"; break;
+								case 19 : isBackStatus = "배송출발"; break;
+								case 21 : isBackStatus = "반품접수"; break;
+								case 22 : isBackStatus = "반품 입고완료"; break;
+								case 31 : isBackStatus = "교환주문 접수"; break;
+								case 32 : isBackStatus = "교환 입고완료"; break;
+								case 33 : isBackStatus = "교환상품 출고완료"; break;
+								case 91 : isBackStatus = "주문취소 접수"; break;
+								case 92 : isBackStatus = "주문취소 완료"; break;
+							}
+							nowStat.put(modens.getGoodsCd(), isBackStatus);
 						
 					}else {
 						continue;
 					}
 				}
-				System.out.println(nowStat);
-			}else {
+				
+				for(int i = 0 ; i < orderCheck.size() ; i++) {
+					String check = nowStat.get(orderCheck.get(i).getGoodsCd()) == null ? "" : nowStat.get(orderCheck.get(i).getGoodsCd());
+					if(check.equals("")) {
+						otherDelivery.add(orderCheck.get(i).getGoodsCd());
+					}
+				}
+
+				//Moden 주문의 경우 해당 배송정보를 확인 ( 모든 직배송인지, 택배 배송인지 )
+				for (String key : modenMap.keySet()) {
+				    System.out.println("key: " + key + " value: " + modenMap.get(key));
+				    deliInfo.put(key, modenMap.get(key));
+				}
+			}
+
+			if((modenList == null || modenList.isEmpty()) || (otherDelivery != null && !otherDelivery.isEmpty())) {
 				//모든 주문건이 아닌 경우 WIS - TW_DIRECTDELI 에서 조회함
 				System.out.println("moden 아닙니다~");
+				System.out.println(otherDelivery);
 				String soDt = ordNo.substring(0, 8);
 				String soSr = ordNo.substring(8, 14);
-				List<TwDirectDeliEntity> tddList = directDeli.findBySoDateAndSoSer(soDt, soSr);
+				List<TwDirectDeliEntity> tddList = new ArrayList<>();
+				if(otherDelivery != null && !otherDelivery.isEmpty()) {
+					for(int i = 0 ; i < otherDelivery.size() ; i++) {
+						System.out.println(otherDelivery.get(i));
+						TwDirectDeliEntity tdd = directDeli.findBySoDateAndSoSerAndGoodsCd(soDt, soSr,otherDelivery.get(i));
+						tddList.add(tdd);
+						nowStat.put(tdd.getGoodsCd(), tdd.getDeliNo());
+					}
+				}else {
+					tddList = directDeli.findBySoDateAndSoSer(soDt, soSr);
+				}
 				List<TcodeDtlEntity> tcode = tcodeDetail.findByCdNo("S45");
 				System.out.println(tcode);
 				
@@ -319,35 +394,26 @@ public class KakaoChatBotContorller {
 						
 						String deliNo = tdd.getDeliNo() == null ? "" : tdd.getDeliNo();
 						if(!deliNo.equals("")) {
-							IntStream stream = ((CharSequence) deliNo).chars();
-							String intStrDeliNo = stream.filter((ch)-> (48 <= ch && ch <= 57))
-							        .mapToObj(ch -> (char)ch)
-							        .map(Object::toString)
-							        .collect(Collectors.joining());
-							//송장 번호가 아닌 다른 사유가 있는 경우 패스함
-							if(intStrDeliNo.equals("")) {
-								continue;
-							}else {
-								for(int j = 0 ; j < tcode.size() ; j++) {
-									TcodeDtlEntity code = tcode.get(j);
-									if(tdd.getDeliHouse().equals(code.getCdDtlNo())) {
-										String codeUrl = code.getCodeUrl() == null ? "" : code.getCodeUrl();
-										if(!codeUrl.equals("")) {
-											boolean isUrl = false;
-											isUrl = isUrl(codeUrl);
-											// url인거 확인
-											if(isUrl) {
-												String callAPI = callLogAPI(codeUrl, deliNo);
-												System.out.println(callAPI);
-											}
-										}
-									}
-								}
-							}
+							deliInfo.put(deliNo, tdd.getDeliHouse());
 						}
 					}
 				}
 			}
+			JSONArray apiValue = searchDeliStatus(deliInfo);
+			System.out.println(apiValue);
+			
+			for(int i = 0 ; i < apiValue.length() ; i++) {
+				JSONObject json = apiValue.getJSONObject(i);
+				String deliNo = json.getString("carrierId");
+				
+				if(deliInfo.get(deliNo) != null) {
+					deliInfo.put(deliNo,json.getString("status"));
+				}
+			}
+			
+			System.out.println("-----------" + nowStat);
+			System.out.println(deliInfo);
+			
 		}else if(pchType.equals("400")) {
 			
 		}
@@ -383,91 +449,79 @@ public class KakaoChatBotContorller {
 	}
 	
 	/*
-	 * URL 여부 확인
-	 * */
-	public static boolean isUrl(String text) {
-	    Pattern p = Pattern.compile("^(?:http(s)?:\\/\\/)?(?:www\\.)?[a-zA-Z0-9./]+$");
-	    Matcher m = p.matcher(text);
-	    if  (m.matches()) return true;
-	    URL u = null;
-	    try {
-	        u = new URL(text);
-	    } catch (MalformedURLException e) {
-	        return false;
-	    }
-	    try {
-	        u.toURI();
-	    } catch (URISyntaxException e) {
-	        return false;
-	    }
-	    return true;
-	}
-	
-	/*
 	 * 택배사 API 조회
-	 * url / 송장번호
+	 * url : TRACKER_URL / carrier_id : tracker code / track_id : 송장번호
+	 * 
+	 * https://apis.tracker.delivery/carriers/:carrier_id/tracks/:track_id
+	 * 
 	 * */
-	public String callLogAPI(String url , String deliCode) {
+	public JSONObject callLogAPI(String carrierId , String trackId) {
 	    
-		String query;
 		String responseBody = "";
-	    try {
-	        query = URLEncoder.encode(deliCode, "UTF-8");
-	    } catch (UnsupportedEncodingException e) {
-	        throw new RuntimeException("인코딩 실패", e);
-	    }
-	    String apiURL = url;
-	    responseBody = GETMethod(apiURL, query);
+		JSONObject retVal = new JSONObject();
+		
+	    String apiURL = TRACKER_URL+carrierId+"/tracks/"+trackId;
+	    
+	    responseBody = GETMethod(apiURL);
 	    System.out.println(responseBody);
+	    
 	    JSONObject statusJson = new JSONObject(responseBody);
+	    JSONObject carrierJson = new JSONObject();
+	    JSONObject nowPlaceJson = new JSONObject();
+	    
+	    JSONArray progressJson = new JSONArray();
+	    
 	    System.out.println(statusJson.toString());
+	   
+	    carrierJson = new JSONObject(statusJson.get("carrier").toString());
+	    progressJson = new JSONArray(statusJson.get("progresses").toString());
+	    statusJson = new JSONObject(statusJson.get("state").toString());
 	    
-	    statusJson = new JSONObject(statusJson.get("message").toString());
-	    statusJson = new JSONObject(statusJson.get("result").toString());
-	    String translatedText = (String)statusJson.get("translatedText");
+	    for(int i = 0 ; i < progressJson.length() ; i++ ) {
+	    	JSONObject initJson = progressJson.getJSONObject(i);
+	    	JSONObject stat = initJson.getJSONObject("status");
+	    	
+	    	if(statusJson.get("id").equals(stat.get("id"))) {
+	    		
+	    		String[] delBracketText = new String[2];
+				try {
+					delBracketText = deleteBracket(initJson.getString("description"));
+					stat = initJson.getJSONObject("location");
+					retVal.put("description", delBracketText[0] == null ? "" : delBracketText[0]);
+					retVal.put("deliveryWorker", delBracketText[1] == null ? "" : delBracketText[1]);
+		    		retVal.put("time", initJson.getString("time"));
+		    		retVal.put("location", stat.getString("name"));
+				} catch (Exception e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+	    	}
+	    }
 	    
-	    return translatedText;
+	    retVal.put("status", statusJson.getString("text"));
+	    retVal.put("carrierId", carrierJson.getString("id"));
+	    
+	    return retVal;
 	}
 	
-	private static String GETMethod(String apiUrl, String text){
+	private static String GETMethod(String apiUrl){
 		
-        HttpURLConnection con = connect(apiUrl+text);
-        String postParams = "";
+        System.out.println(apiUrl);
         
         try {
-            con.setRequestMethod("GET");
-
-            con.setDoOutput(true);
-            try (DataOutputStream wr = new DataOutputStream(con.getOutputStream())) {
-                wr.write(postParams.getBytes());
-                wr.flush();
-            }
-
-            int responseCode = con.getResponseCode();
-            if (responseCode == HttpURLConnection.HTTP_OK) { // 정상 응답
-                return readBody(con.getInputStream());
-            } else {  // 에러 응답
-                return readBody(con.getErrorStream());
-            }
+            
+        	URL url = new URL(apiUrl);
+            URLConnection connection = url.openConnection();
+            
+            return readBodyAPI(connection.getInputStream());
+            
         } catch (IOException e) {
             throw new RuntimeException("API 요청과 응답 실패", e);
-        } finally {
-            con.disconnect();
-        }
-    }
-	
-	private static HttpURLConnection connect(String apiUrl){
-        try {
-            URL url = new URL(apiUrl);
-            return (HttpURLConnection)url.openConnection();
-        } catch (MalformedURLException e) {
-            throw new RuntimeException("API URL이 잘못되었습니다. : " + apiUrl, e);
-        } catch (IOException e) {
-            throw new RuntimeException("연결이 실패했습니다. : " + apiUrl, e);
-        }
+        } 
     }
 
-    private static String readBody(InputStream body){
+    private static String readBodyAPI(InputStream body){
+    	
         InputStreamReader streamReader = new InputStreamReader(body);
 
         try (BufferedReader lineReader = new BufferedReader(streamReader)) {
@@ -482,5 +536,98 @@ public class KakaoChatBotContorller {
         } catch (IOException e) {
             throw new RuntimeException("API 응답을 읽는데 실패했습니다.", e);
         }
+    }
+    
+    //괄호내 정보 제거 ( 배송기사 이름 및 전화번호 제거 )
+    static String[] deleteBracket(String text) throws Exception {
+		
+		Matcher matcher = PATTERN_BRACKET.matcher(text);
+		
+		String removeText = text;
+		String pureText = text;
+		String VOID = "";
+		
+		PATTERN_BRACKET = Pattern.compile("\\([^\\(\\)]+\\)");
+		matcher = PATTERN_BRACKET.matcher(pureText);
+		while(matcher.find()) {
+			int startIndex = matcher.start();
+			int endIndex = matcher.end();
+			
+			removeText = pureText.substring(startIndex, endIndex);
+			pureText = pureText.replace(removeText, VOID);
+			matcher = PATTERN_BRACKET.matcher(pureText);
+		}
+		
+		String[] values = new String[2];
+		values[0] = pureText;
+		values[1] = removeText;
+		
+		return values;
+    }
+    
+    public HashMap<String,String> parseListMap(JSONArray jarr){
+    	
+    	HashMap<String,String> parcelMap = new HashMap<String,String>();
+    	
+    	for(int j = 0; j < jarr.length() ; j++) {
+			try {
+				List<Map<String, Object>> paramMap = 
+						   new ObjectMapper().readValue(jarr.get(j).toString(), new TypeReference<List<Map<String, Object>>>(){});
+				System.out.println(paramMap);
+				for(Map<String,Object> paramMaps : paramMap) {
+					if(paramMaps.get("PARCELSERVICE").equals(MODEN_CODE)) {
+						parcelMap.put(MODEN_CODE,"");
+					}else {
+						String deliCode = paramMaps.get("PARCELNUMBER") == null ? "" : paramMaps.get("PARCELNUMBER").toString().replaceAll("-", "");
+						parcelMap.put(deliCode, paramMaps.get("PARCELSERVICE") == null ? "" : paramMaps.get("PARCELSERVICE").toString());
+					}
+				}
+			} catch (Exception e) {
+				e.printStackTrace();
+			}
+		}
+    	
+    	return parcelMap;
+    }
+    
+    public JSONArray searchDeliStatus(HashMap<String,String> deliInfo) {
+
+    	JSONArray retValue = new JSONArray();
+		TrackerDeliBO tracker = new TrackerDeliBO();
+		HashMap<String,String> trackers = tracker.getTrackerName();
+		
+    	for (String key : deliInfo.keySet()) {
+    		
+    		String deliCode = deliInfo.get(key);
+    		String deliNo = key;
+    		
+    		if(deliCode.equals(MODEN_CODE)) {
+    			
+    		}else if(!deliNo.equals("")) {
+    			IntStream stream = ((CharSequence) deliNo).chars();
+    			String intStrDeliNo = stream.filter((ch)-> (48 <= ch && ch <= 57))
+    			        .mapToObj(ch -> (char)ch)
+    			        .map(Object::toString)
+    			        .collect(Collectors.joining());
+    			//송장 번호가 아닌 다른 사유가 있는 경우 패스함
+    			if(intStrDeliNo.equals("")) {
+    				continue;
+    			}else {
+    				//택배사에 따른 API 조회 코드를 확인
+    				if(deliCode.equals("")) {
+    					//API 조회코드 없음
+    				}else {
+    					//API 조회코드 있음
+    					deliCode = trackers.get(deliCode);
+    					
+    					JSONObject apiValue = callLogAPI(deliCode,deliNo);
+    					System.out.println(apiValue);
+    					retValue.put(apiValue);
+    				}
+    			}
+    		}
+    	}
+    	
+    	return retValue;
     }
 }

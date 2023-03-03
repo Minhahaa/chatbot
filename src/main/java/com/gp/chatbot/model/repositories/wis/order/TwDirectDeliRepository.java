@@ -10,4 +10,6 @@ import com.gp.chatbot.model.vo.wis.order.TwDirectDeliEntity;
 @EnableJpaRepositories
 public interface TwDirectDeliRepository  extends JpaRepository<TwDirectDeliEntity, String> {
 	List<TwDirectDeliEntity> findBySoDateAndSoSer(String soDate, String soSer);
+
+	TwDirectDeliEntity findBySoDateAndSoSerAndGoodsCd(String soDt, String soSr, String goodsCd);
 }
