@@ -1,5 +1,5 @@
 server:
-  port: 443
+  port: 12002
   ssl:
    enabled: true
    key-store: www.weconn.co.kr_jks.jks

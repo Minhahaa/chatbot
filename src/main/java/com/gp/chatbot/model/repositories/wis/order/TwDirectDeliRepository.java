@@ -12,4 +12,6 @@ public interface TwDirectDeliRepository  extends JpaRepository<TwDirectDeliEntit
 	List<TwDirectDeliEntity> findBySoDateAndSoSer(String soDate, String soSer);
 
 	TwDirectDeliEntity findBySoDateAndSoSerAndGoodsCd(String soDt, String soSr, String goodsCd);
+
+	List<TwDirectDeliEntity> findByDeliNo(String deliNo);
 }
