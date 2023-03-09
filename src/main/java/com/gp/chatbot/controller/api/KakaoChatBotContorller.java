@@ -7,9 +7,11 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.text.DateFormat;
+import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -35,6 +37,7 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gp.chatbot.model.bo.project.TrackerDeliBO;
 import com.gp.chatbot.model.repositories.besti.order.ModenStatRepository;
+import com.gp.chatbot.model.repositories.besti.order.ModenStatRepositorySupport;
 import com.gp.chatbot.model.repositories.erp.order.OrderDetailRepository;
 import com.gp.chatbot.model.repositories.erp.order.OrderMasterRepository;
 import com.gp.chatbot.model.repositories.sm.common.TcodeDtlRepository;
@@ -43,15 +46,13 @@ import com.gp.chatbot.model.repositories.wis.member.WisDriverDeliveryRepository;
 import com.gp.chatbot.model.repositories.wis.member.WisDriverRepository;
 import com.gp.chatbot.model.repositories.wis.order.TwDirectDeliRepository;
 import com.gp.chatbot.model.vo.besti.order.ModenStatEntity;
-import com.gp.chatbot.model.vo.besti.order.QModenStatEntity;
 import com.gp.chatbot.model.vo.erp.order.OrderDetailEntity;
 import com.gp.chatbot.model.vo.erp.order.OrderMasterEntity;
 import com.gp.chatbot.model.vo.sm.common.TcodeDtlEntity;
+import com.gp.chatbot.model.vo.sm.order.TdeliStatEntity;
 import com.gp.chatbot.model.vo.wis.member.WisDriverDeliveryEntity;
 import com.gp.chatbot.model.vo.wis.member.WisDriverEntity;
 import com.gp.chatbot.model.vo.wis.order.TwDirectDeliEntity;
-import com.querydsl.core.types.dsl.Expressions;
-import com.querydsl.jpa.impl.JPAQueryFactory;
 
 @RestController
 @RequestMapping("/api")
@@ -127,6 +128,9 @@ public class KakaoChatBotContorller {
 	private ModenStatRepository modenStat; //BEST-I Moden office order status table
 	
 	@Autowired
+	private ModenStatRepositorySupport modenSupport;
+	
+	@Autowired
 	private OrderMasterRepository orderMaster; //ERP SAM0210 ORDER MASTER
 	
 	@Autowired
@@ -149,6 +153,8 @@ public class KakaoChatBotContorller {
 	
 	@PersistenceContext
     private EntityManager em;
+	
+	private TrackerDeliBO tracker = new TrackerDeliBO();
 	
 	
 	static final String MODEN_CUST = "94226"; 
@@ -182,7 +188,6 @@ public class KakaoChatBotContorller {
 		
 		JSONObject jsonObject = new JSONObject(readbody);
 		String ordNo = jsonObject.get("utterance").toString();
-		
 		
 		IntStream stream = ((CharSequence) ordNo).chars();
 		String intStr = stream.filter((ch)-> (48 <= ch && ch <= 57))
@@ -238,24 +243,12 @@ public class KakaoChatBotContorller {
 			if(deliCheck != null && !deliCheck.isEmpty()) {
 				return makingCheck(intStr, "SUCCESS");
 			}else {
-				List<ModenStatEntity> moden = modenStat.findByParcelDataLike("%"+deliNo+"%");
-				JPAQueryFactory jpaQueryFactory = new JPAQueryFactory(em);
-				QModenStatEntity qms = new QModenStatEntity("modenStatEntity");
+				List<ModenStatEntity> moden = modenSupport.getDeliNo(deliNo);
 				
 				if(moden != null && !moden.isEmpty()) {
 					return makingCheck(intStr, "SUCCESS");
 				}else{
-					moden = jpaQueryFactory.select(qms)
-							.from(qms)
-							.where(Expressions.stringTemplate("function('replace', {0}, {1}, {2})", qms.parcelData, "-", "").like("%"+deliNo.replaceAll("-", "")+"%"))
-							.limit(5)
-							.fetch();
-					
-					if(moden != null && !moden.isEmpty()) {
-						return makingCheck(intStr, "SUCCESS");
-					}else{
-						return makingCheck(intStr, "FAIL");
-					}
+					return makingCheck(intStr, "FAIL");
 				}
 			}
 		}else {
@@ -263,6 +256,92 @@ public class KakaoChatBotContorller {
 		}
 	}
 	
+	@RequestMapping(value="/deliNoSearch", produces = "application/json; charset=utf-8")
+	@ResponseBody
+	public String deliNoSearch( HttpServletRequest request , HttpServletResponse response ) throws Exception {
+		
+		System.out.println("deliNoSearch 요청옴");
+
+		String readbody = readBody(request);
+		System.out.println(readbody);
+		
+		JSONObject jsonObject = new JSONObject(readbody);
+		
+		JSONObject action = jsonObject.getJSONObject("action");
+		JSONObject params = action.getJSONObject("params");
+		
+		String deliNo = params.get("sys_deli_no").toString();
+		
+		IntStream stream = ((CharSequence) deliNo).chars();
+		String intStr = stream.filter((ch)-> (48 <= ch && ch <= 57))
+		        .mapToObj(ch -> (char)ch)
+		        .map(Object::toString)
+		        .collect(Collectors.joining());
+		
+		//주문번호가 10 ~ 13자리 이면서 주문 마스터 테이블에 존재하는지 확인
+		if(intStr.length() > 9 && intStr.length() < 14) {
+			
+			TrackerDeliBO tracker = new TrackerDeliBO();
+			HashMap<String,String> trackerCodes = tracker.getTrackerCode();
+			
+			List<TwDirectDeliEntity> deliCheck = directDeli.findByDeliNo(deliNo);
+			//주문정보가 없는지 확인
+			if(deliCheck != null && !deliCheck.isEmpty()) {
+				
+				//System.out.println("is deli = " + deliCheck);
+				String crrCode = trackerCodes.get(deliCheck.get(0).getDeliHouse());
+				JSONObject apiValue = callLogAPI(crrCode,deliNo);
+				System.out.println("is deli = " + apiValue);
+				
+				return makingOrderStatJson(apiValue, "SUCCESS");
+				
+			}else {
+				List<ModenStatEntity> modens = modenSupport.getDeliNo(deliNo);
+				HashMap<String ,String> modenMap = new HashMap<>();
+				HashMap<String ,String> modenDeliveryMan = new HashMap<>();
+				HashMap<String, String> modenDeliveryMap = new HashMap<>();
+				
+				String trackCode = "";
+				
+				if(modens != null && !modens.isEmpty()) {
+					
+					for(int i = 0 ; i < modens.size() ; i++) {
+						JSONArray parcelJson = new JSONArray();
+						ModenStatEntity moden = modens.get(i);
+						
+						parcelJson.put(moden.getParcelData());
+						//System.out.println(parcelJson);
+						if(parcelJson.isEmpty() || parcelJson.isNull(0)) {
+							//otherDelivery.add(modenList.get(i).getGoodsCd());
+						}else {
+							modenMap = parseListMap(parcelJson);
+							modenDeliveryMan.put("deliveryWorker", modenMap.get("deliveryWorker"));
+							for(String key : modenMap.keySet()) {
+								modenDeliveryMap.put(key, modenMap.get(key));
+							}
+							System.out.println("***********" + modenMap);
+						}
+					}
+					System.out.println("모맵 = " + modenMap);
+					
+					for(String key : modenDeliveryMap.keySet()) {
+						if(deliNo.equals(key)) {
+							trackCode = modenDeliveryMap.get(key);
+							trackCode = trackerCodes.get(trackCode);
+						}
+					}
+					JSONObject apiValue = callLogAPI(trackCode,deliNo);
+					
+					return makingOrderStatJson(apiValue, "SUCCESS");
+				}else{
+					return makingCheck(intStr, "FAIL");
+				}
+			}
+		}else {
+			return makingCheck(intStr, "FAIL");
+		}
+		
+	}
 	
 	/* 2023.03.02 시스템에서 사용하는 택배사 코드 / 황민하 대리
 	 * ==========================================
@@ -402,7 +481,7 @@ public class KakaoChatBotContorller {
 	}
 	
 	//PCH TYPE별 조회
-	public JSONObject pchTypeCheck(List<OrderDetailEntity> orderCheck, String ordNo) {
+	public JSONObject pchTypeCheck(List<OrderDetailEntity> orderCheck, String ordNo) throws ParseException {
 		
 		JSONObject retValue = new JSONObject();
 		
@@ -410,6 +489,7 @@ public class KakaoChatBotContorller {
 		String pchType = orderCheck.get(0).getPchType();
 		
 		HashMap<String,String> deliInfo = new HashMap<>(); //전체 송장내용 저장 Map
+		String allStatus = "";
 		
 		if(pchType.equals("100") || pchType.equals("400")) {
 			//PCH TYPE이 100인 물류센터에서 바로 나가는 주문건
@@ -432,6 +512,62 @@ public class KakaoChatBotContorller {
 			System.out.println(apiValue);
 			System.out.println(nowStat);
 			
+			//송장에 대해서 전체 상태값을 확인
+			String now = "";
+			String before = "";
+			
+			HashMap<String, String> endDeliInfo = new HashMap<>();
+			
+			int index = 0;
+			for (String key : deliInfo.keySet()) {
+				System.out.println("2. key: " + key + " value: " + deliInfo.get(key));
+				
+				now = deliInfo.get(key);
+				//moden office 주문에 대한 key는 패스
+				if(key.equals(MODEN_CODE)) {
+					for(String s : nowStat.keySet()) {
+		    			endDeliInfo.put(s, now);
+		    		}
+					allStatus = now;
+					continue;
+				}else if(key.equals("deliveryWorker")) {
+					continue;
+				}
+				
+			    if(index == 0) {
+			    	allStatus = now;
+			    }else {
+			    	if(!now.equals(before)) {
+			    		List<TwDirectDeliEntity> tdd = directDeli.findByDeliNo(key);
+			    		
+			    		if(tdd != null && !tdd.isEmpty()) {
+			    			for(TwDirectDeliEntity td : tdd) {
+				    			endDeliInfo.put(td.getGoodsCd(), now);
+				    		}
+			    		}else {
+			    			allStatus = now;
+			    			break;
+			    		}
+			    	}else {
+			    		allStatus = now;
+			    	}
+			    }
+			    before = now;
+			    index ++;
+			}
+			
+			for(String key : nowStat.keySet()) {
+				
+				nowStat.put(key, allStatus);
+				String goodsCdStatus = endDeliInfo.get(key) == null ? "" : endDeliInfo.get(key);
+				if(goodsCdStatus.equals("")) {
+					
+				}else {
+					nowStat.put(key, goodsCdStatus);
+				}
+			}
+			
+			
 			retValue.put("deliveryStatus", deliInfo);
 			retValue.put("apiValues", apiValue);
 			
@@ -439,6 +575,8 @@ public class KakaoChatBotContorller {
 			//best-i의 ModenStat Table에 모든 주문건인지 확인 ( 확인 로직 추가 )
 			List<ModenStatEntity> modenList = modenStat.findByUnqNoLikeOrderByStatusDesc(ordNo+"%");
 			HashMap<String, String> modenDeliveryMan = new HashMap<>();
+			HashMap<String, String> modenDeliveryMap = new HashMap<>();
+			
 			ArrayList<String> otherDelivery = new ArrayList<>();
 			
 			if(modenList != null && !modenList.isEmpty() ) {
@@ -477,7 +615,9 @@ public class KakaoChatBotContorller {
 					}else {
 						modenMap = parseListMap(parcelJson);
 						modenDeliveryMan.put("deliveryWorker", modenMap.get("deliveryWorker"));
-						
+						for(String key : modenMap.keySet()) {
+							modenDeliveryMap.put(key, modenMap.get(key));
+						}
 						System.out.println("***********" + modenMap);
 					}
 					
@@ -520,9 +660,9 @@ public class KakaoChatBotContorller {
 				}
 
 				//Moden 주문의 경우 해당 배송정보를 확인 ( 모든 직배송인지, 택배 배송인지 )
-				for (String key : modenMap.keySet()) {
-				    System.out.println("1. key: " + key + " value: " + modenMap.get(key));
-				    deliInfo.put(key, modenMap.get(key));
+				for (String key : modenDeliveryMap.keySet()) {
+				    System.out.println("1. key: " + key + " value: " + modenDeliveryMap.get(key));
+				    deliInfo.put(key, modenDeliveryMap.get(key));
 				}
 			}
 
@@ -564,7 +704,7 @@ public class KakaoChatBotContorller {
 			}
 			
 			JSONArray apiValue = searchDeliStatus(deliInfo , ordNo);
-			String allStatus = "";
+			
 			
 			System.out.println(apiValue);
 			
@@ -593,19 +733,28 @@ public class KakaoChatBotContorller {
 			String before = "";
 			
 			HashMap<String, String> endDeliInfo = new HashMap<>();
+			JSONObject ModenDeliveryWorkers = new JSONObject();
 			
 			int index = 0;
 			for (String key : deliInfo.keySet()) {
 				System.out.println("2. key: " + key + " value: " + deliInfo.get(key));
 				
+				now = deliInfo.get(key);
 				//moden office 주문에 대한 key는 패스
 				if(key.equals(MODEN_CODE)) {
+					for(String s : nowStat.keySet()) {
+		    			endDeliInfo.put(s, now);
+		    		}
+					allStatus = now;
 					continue;
 				}else if(key.equals("deliveryWorker")) {
+					ModenDeliveryWorkers.put("modenDelivery", deliInfo.get(key));
+					deliInfo.remove(key);
+					retValue.put("modenDelivery", ModenDeliveryWorkers);
+					
 					continue;
 				}
 				
-				now = deliInfo.get(key);
 			    if(index == 0) {
 			    	allStatus = now;
 			    }else {
@@ -630,10 +779,9 @@ public class KakaoChatBotContorller {
 			
 			for(String key : nowStat.keySet()) {
 				
-				nowStat.put(key, allStatus);
 				String goodsCdStatus = endDeliInfo.get(key) == null ? "" : endDeliInfo.get(key);
 				if(goodsCdStatus.equals("")) {
-					
+					nowStat.put(key, allStatus);
 				}else {
 					nowStat.put(key, goodsCdStatus);
 				}
@@ -648,6 +796,8 @@ public class KakaoChatBotContorller {
 			
 		}
 		retValue.put("goodsStatus", nowStat);
+		
+		System.out.println("last retValue == " + retValue);
 		return retValue;
 	}
 	
@@ -687,6 +837,13 @@ public class KakaoChatBotContorller {
 	 * */
 	public JSONObject callLogAPI(String carrierId , String trackId) {
 	    
+		
+		HashMap<String,String> trackers = tracker.getTrackerName();
+		
+		String deliComName = trackers.get(carrierId);
+		
+		System.out.println(carrierId);
+		
 		String responseBody = "";
 		JSONObject retVal = new JSONObject();
 		
@@ -710,9 +867,31 @@ public class KakaoChatBotContorller {
 			retVal.put("deliveryWorker", "미정");
     		retVal.put("time", "미정");
     		retVal.put("location", "미정");
-    		
     		retVal.put("status", "발송준비");
     	    retVal.put("carrierId", trackId);
+    	    retVal.put("company", deliComName);
+    	    
+    	    System.out.println("발송준비 com = " + deliComName);
+    	    
+    	    JSONObject tempJson = new JSONObject();
+    	    JSONObject tempJson2 = new JSONObject();
+    	    DateFormat format = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSXXX");
+    		String datestr = format.format(Calendar.getInstance().getTime());
+    		
+    	    tempJson.put("description", "");
+    	    
+    	    tempJson2.put("name", "발송준비");
+    	    tempJson.put("location", tempJson2);
+    	    tempJson.put("time", datestr);
+    	    
+    	    tempJson2 = new JSONObject();
+    	    tempJson2.put("id", "at_packing");
+    	    tempJson2.put("text", "발송준비");
+    	    
+    	    tempJson.put("status", tempJson2);
+    	    progressJson.put(tempJson);
+    	    
+    	    retVal.put("allProgress", progressJson);
     	    
 	    	return retVal;
 	    	
@@ -736,6 +915,9 @@ public class KakaoChatBotContorller {
 					retVal.put("deliveryWorker", delBracketText[1] == null ? "" : delBracketText[1]);
 		    		retVal.put("time", initJson.getString("time"));
 		    		retVal.put("location", stat.getString("name"));
+		    		retVal.put("company", deliComName);
+		    		retVal.put("allProgress", progressJson);
+		    		
 				} catch (Exception e) {
 					// TODO Auto-generated catch block
 					e.printStackTrace();
@@ -745,7 +927,7 @@ public class KakaoChatBotContorller {
 	    
 	    retVal.put("status", statusJson.getString("text"));
 	    retVal.put("carrierId", carrierJson.getString("id"));
-	    
+	    System.out.println("retval is = " + retVal);
 	    return retVal;
 	}
 	
@@ -854,11 +1036,10 @@ public class KakaoChatBotContorller {
     	return parcelMap;
     }
     
-    public JSONArray searchDeliStatus(HashMap<String,String> deliInfo, String ordNo) {
+    public JSONArray searchDeliStatus(HashMap<String,String> deliInfo, String ordNo) throws ParseException {
 
     	JSONArray retValue = new JSONArray();
-		TrackerDeliBO tracker = new TrackerDeliBO();
-		HashMap<String,String> trackers = tracker.getTrackerName();
+		HashMap<String,String> trackers = tracker.getTrackerCode();
 		
     	for (String key : deliInfo.keySet()) {
     		
@@ -899,12 +1080,11 @@ public class KakaoChatBotContorller {
     	return retValue;
     }
     
-    public JSONObject getModenAndGP(String ordNo, String deliNo) {
+    public JSONObject getModenAndGP(String ordNo, String deliNo) throws ParseException {
     	
     	JSONObject apiValue = new JSONObject();
     	
     	//물류에서 체크하는 상태값을 확인
-		List<OrderMasterEntity> master = orderMaster.findByOrdNo(ordNo);
 		List<OrderDetailEntity> orderCheck = orderDetail.findByOrdNo(ordNo);
 		List<TcodeDtlEntity> tcode = tcodeDetail.findByCdNo("W04"); //물류 상태 코드
 		HashMap<String,String> statusCodes = new HashMap<>();
@@ -918,8 +1098,8 @@ public class KakaoChatBotContorller {
 		}
 		
 		//status code(직배송의 배송상태)를 확인해서 상태값을 넣어줌
-		String status = statusCodes.get(master.get(0).getStatusCode()) == null ? "" : statusCodes.get(master.get(0).getStatusCode());
-		System.out.println("status = " + status);
+		String status = "";
+		
 		String DriverName = "조회불가";
 		List<WisDriverDeliveryEntity> driver = wisDelivery.findByOrdNo(ordNo);
 		if(driver != null && !driver.isEmpty()) {
@@ -946,8 +1126,10 @@ public class KakaoChatBotContorller {
 			apiValue.put("deliveryWorker", DriverName);
 			apiValue.put("time", datestr);
 			apiValue.put("location", "조회불가");
-			apiValue.put("status", "");
+			//apiValue.put("status", "");
 			apiValue.put("carrierId", deliNo);
+			apiValue.put("company", "조회불가");
+			
 		}else {
 			//pch type이 100이 아니지만 물류 상태코드를 통해 조회가 되는 경우
 			for(int i = 0 ; i < orderCheck.size() ; i++) {
@@ -955,10 +1137,66 @@ public class KakaoChatBotContorller {
 				apiValue.put("deliveryWorker", DriverName);
 				apiValue.put("time", datestr);
 				apiValue.put("location", "조회불가");
-				apiValue.put("status", status);
+				//apiValue.put("status", status);
 				apiValue.put("carrierId", deliNo);
+				apiValue.put("company", "직접배송");
+				
 			}
 		}
+		
+		List<TdeliStatEntity> tdeli = tdeliStat.findByOrdNo(ordNo);
+		if(tdeli != null && !tdeli.isEmpty()) {
+			JSONArray allProgress = new JSONArray();
+			SimpleDateFormat dbFormat = new SimpleDateFormat("yyyyMMddHHmmss");
+			
+			String beforeCheck = "";
+			String nowCheck ="";
+			String nowStatus = "";
+			for(int i = 0 ; i < tdeli.size() ; i++) {
+				
+				nowCheck = tdeli.get(i).getDelvItmCd();
+				nowStatus = statusCodes.get(tdeli.get(i).getDelvItmCd());
+				
+				if(!nowCheck.equals(beforeCheck)) {
+
+					JSONObject progress = new JSONObject();
+					JSONObject tempJson = new JSONObject();
+					tempJson.put("name", "확인불가");
+					
+					progress.put("description", tempJson);
+					progress.put("location", tempJson);
+					
+					tempJson = new JSONObject();
+					tempJson.put("id", "do_not_checking");
+					
+					String now = statusCodes.get(tdeli.get(i).getDelvItmCd());
+					
+					
+					tempJson.put("text", now);
+					progress.put("status", tempJson);
+					
+					
+					Date date = dbFormat.parse(tdeli.get(i).getRegDm());
+					datestr = format.format(date);
+					
+					progress.put("time", datestr);
+					allProgress.put(progress);
+					
+				}
+				
+				beforeCheck = tdeli.get(i).getDelvItmCd();
+				if(i == tdeli.size()-1) {
+					System.out.println(nowStatus);
+					apiValue.put("status", nowStatus);
+				}
+				System.out.println(nowCheck + " , " + beforeCheck);
+			}
+			apiValue.put("allProgress", allProgress);
+		}else {
+			apiValue.put("status", "확인불가");
+		}
+		System.out.println("moden status = " + status);
+		
 		return apiValue;
     }
 }

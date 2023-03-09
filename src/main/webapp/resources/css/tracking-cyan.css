@@ -1,0 +1,122 @@
+/**
+ * Created by yyh on 2017. 4. 20..
+ */
+
+@import url(https://fonts.googleapis.com/earlyaccess/notosanskr.css);
+
+body {
+    font-family: 'Noto Sans KR', sans-serif;
+    font-size: 13px;
+}
+
+/* notice 스타일 */
+
+.header-title {
+    border-bottom: solid 2px #dddddd;
+    margin-bottom: 30px;
+    padding-bottom: 10px;
+
+    font-weight: 500;
+    font-style: normal;
+    color: #777777;
+}
+
+.notice-area {
+    padding: 15px 0 15px 0;
+}
+
+.label-style {
+    font-family: NotoSansCJKkr;
+    color: #3cc6d3;
+    font-weight: normal;
+}
+
+.info-style {
+    font-family: NotoSansCJKkr;
+    font-weight: normal;
+    color: #343434;
+}
+
+/* notice 스타일 end */
+
+/* bootstrap 테이블 커스터 마이징 */
+.table-striped > tbody > tr:nth-of-type(odd) {
+    background-color: rgba(54, 198, 211, 0.06);
+}
+
+.table > thead > tr > th {
+    vertical-align: bottom;
+    border-bottom: 2px solid #ddd;
+    padding: 11px;
+}
+
+.table > tbody > tr > td, .table > tfoot > tr > td {
+    padding: 11px;
+    line-height: 1.42857143;
+    vertical-align: top;
+    border-top: 0px;
+}
+
+.table-striped > thead {
+
+    font-weight: 500;
+    color: #777777;
+}
+
+.table-striped > tbody {
+
+    font-weight: 300;
+    color: #777777;
+}
+
+.td-time {
+    width: 45%;
+}
+
+.td-location {
+    width: 30%;
+    text-overflow: ellipsis;
+    overflow: hidden;
+
+}
+
+.td-status {
+    width: 25%;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+/* bootstrap 테이블 커스터 마이징 end */
+
+@media (min-width: 767px)
+{
+    body {
+        font-size: 15px;
+    }
+    .td-time {
+        width: 40%;
+    }
+
+    .td-location {
+        width: 40%;
+    }
+
+    .td-status {
+        width: 20%;
+    }
+}
+
+.notice-footer-area {
+    background-color: #f0f0f0;
+    height: 44px;
+    padding: 12px 16px;
+}
+
+.template-notice {
+    font-size: 12px;
+    color: #757575;
+}
+
+.banner-area {
+    background-color: rgba(54, 198, 211, 0.1);
+}

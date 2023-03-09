@@ -16,5 +16,4 @@ public interface ModenStatRepository  extends JpaRepository<ModenStatEntity, Str
 	List<ModenStatEntity> findByUnqNoLikeOrderByStatusDesc(String string);
 
 	List<ModenStatEntity> findByParcelDataLike(String string);
-
 }
